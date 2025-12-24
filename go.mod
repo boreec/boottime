@@ -1,4 +1,4 @@
-module github.com/boreec/bootprobe
+module github.com/boreec/boottime
 
 go 1.25.5
 

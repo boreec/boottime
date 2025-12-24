@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/boreec/bootprobe/model"
+	"github.com/boreec/boottime/model"
 
 	"github.com/godbus/dbus/v5"
 )

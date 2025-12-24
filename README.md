@@ -1,9 +1,12 @@
-# bootprobe
+# Boottime
+
+**Boottime** is a tool for Linux OS boot time analysis.
 
 ## Requirements
 
 - Go
-- systemd-analyze
+- systemd
+- systemd-analyze (optional)
 
 ## Usage
 
@@ -11,11 +14,11 @@ Append boot time analysis results to a jsonl file. The file is created if it
 does not exist.
 
 ```console
-go run ./cmd/bootprobe -t -f results.jsonl
+go run ./cmd/boottime -t -f results.jsonl
 ```
 
 Display the average of boot time analysis results:
 
 ```console
-go run ./cmd/bootprobe -A -f results.jsonl
+go run ./cmd/boottime -A -f results.jsonl
 ```

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/boreec/bootprobe/exec"
-	"github.com/boreec/bootprobe/model"
+	"github.com/boreec/boottime/exec"
+	"github.com/boreec/boottime/model"
 )
 
 func main() {
