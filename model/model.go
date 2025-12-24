@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-type SystemdAnalyzeTimeRecord struct {
+type BootTimeRecord struct {
 	Firmware  time.Duration
 	Loader    time.Duration
 	Kernel    time.Duration
@@ -15,7 +15,7 @@ type SystemdAnalyzeTimeRecord struct {
 	Total     time.Duration
 }
 
-func ParseSystemdAnalyzeTimeOutput(output string) (*SystemdAnalyzeTimeRecord, error) {
+func ParseSystemdAnalyzeTimeOutput(output string) (*BootTimeRecord, error) {
 	lines := strings.Split(output, "\n")
 	if len(lines) == 0 {
 		return nil, errors.New("empty output")
@@ -25,7 +25,7 @@ func ParseSystemdAnalyzeTimeOutput(output string) (*SystemdAnalyzeTimeRecord, er
 	words := strings.Fields(line)
 
 	// Startup finished in 1.762s (firmware) + 265ms (loader) + 640ms (kernel) + 196ms (initrd) + 1.667s (userspace) = 4.532s
-	var record SystemdAnalyzeTimeRecord
+	var record BootTimeRecord
 	var err error
 	for idx, word := range words {
 		switch {

@@ -15,8 +15,9 @@ import (
 )
 
 func main() {
-	var flagTimeAnalysis, flagAverageAggregate bool
+	var flagTimeAnalysis, flagUseDBusClient, flagAverageAggregate bool
 	var flagAggregateFileName string
+	flag.BoolVar(&flagUseDBusClient, "d", false, "skip systemd-analyze and retrieve time via dbus")
 	flag.BoolVar(&flagTimeAnalysis, "t", false, "run time analysis")
 	flag.BoolVar(&flagAverageAggregate, "A", false, "print the average of a file aggregate")
 	flag.StringVar(&flagAggregateFileName, "f", "", "concatenate systemd-analyse results to the file")
@@ -29,6 +30,10 @@ func main() {
 	if !flagTimeAnalysis && !flagAverageAggregate {
 		panic("no actions selected")
 	}
+	if flagUseDBusClient && !flagTimeAnalysis {
+		panic("-t is required when using -d")
+	}
+
 	if flagTimeAnalysis && flagAggregateFileName == "" {
 		panic("-f is required when using -t")
 	}
@@ -54,7 +59,7 @@ func main() {
 	defer aggregateFile.Close()
 
 	if flagTimeAnalysis {
-		record, err := exec.RunSystemdAnalyzeWithTime()
+		record, err := exec.RetrieveBootTime(flagUseDBusClient)
 		if err != nil {
 			panic(err.Error())
 		}
@@ -67,10 +72,10 @@ func main() {
 
 	if flagAverageAggregate {
 		scanner := bufio.NewScanner(aggregateFile)
-		var avg model.SystemdAnalyzeTimeRecord
+		var avg model.BootTimeRecord
 		recCount := 0
 		for scanner.Scan() {
-			var rec model.SystemdAnalyzeTimeRecord
+			var rec model.BootTimeRecord
 			if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
 				panic(err)
 			}
