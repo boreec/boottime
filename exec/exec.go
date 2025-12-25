@@ -1,42 +1,38 @@
 package exec
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/boreec/boottime/model"
-
 	"github.com/godbus/dbus/v5"
+	"golang.org/x/sync/errgroup"
 )
 
-func RetrieveBootTime(useDbus bool) (*model.BootTimeRecord, error) {
-	if useDbus {
-		rec, err := RetrieveBootTimeWithDBUS()
-		if err != nil {
-			return nil, fmt.Errorf("retrieving with dbus: %w", err)
-		}
-		return rec, nil
-	}
-
-	rec, err := RetrieveBootTimeWithSystemdAnalyze()
-	if err != nil {
-		return nil, fmt.Errorf("retrieving with systemd-analyze: %w", err)
-	}
-	return rec, nil
+type BootTimeRecordWithSystemd struct {
+	Firmware  time.Duration
+	Loader    time.Duration
+	Kernel    time.Duration
+	Initrd    time.Duration
+	Userspace time.Duration
+	Total     time.Duration
 }
 
-func RetrieveBootTimeWithSystemdAnalyze() (*model.BootTimeRecord, error) {
+func RetrieveBootTimeWithSystemdAnalyze() (*BootTimeRecordWithSystemd, error) {
 	cmd := exec.Command("systemd-analyze", "time")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("command failed: %w", err)
 	}
-	return model.ParseSystemdAnalyzeTimeOutput(string(out))
+	return ParseSystemdAnalyzeTimeOutput(string(out))
 }
 
-func RetrieveBootTimeWithDBUS() (*model.BootTimeRecord, error) {
+func RetrieveBootTimeWithDbus() (*BootTimeRecordWithSystemd, error) {
 	conn, err := dbus.SystemBus()
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to system bus: %w", err)
@@ -84,7 +80,7 @@ func RetrieveBootTimeWithDBUS() (*model.BootTimeRecord, error) {
 		kernelDoneTime = userspaceTs
 	}
 
-	record := &model.BootTimeRecord{}
+	record := &BootTimeRecordWithSystemd{}
 
 	if firmwareTs > 0 && loaderTs > 0 {
 		record.Firmware = usec(firmwareTs - loaderTs)
@@ -104,4 +100,135 @@ func RetrieveBootTimeWithDBUS() (*model.BootTimeRecord, error) {
 	record.Total = usec(firmwareTs + totalTs)
 
 	return record, nil
+}
+
+func ParseSystemdAnalyzeTimeOutput(output string) (*BootTimeRecordWithSystemd, error) {
+	lines := strings.Split(output, "\n")
+	if len(lines) == 0 {
+		return nil, errors.New("empty output")
+	}
+
+	line := lines[0]
+	words := strings.Fields(line)
+
+	var record BootTimeRecordWithSystemd
+	var err error
+	for idx, word := range words {
+		switch {
+		case strings.Contains(word, "(firmware)"):
+			record.Firmware, err = time.ParseDuration(words[idx-1])
+		case strings.Contains(word, "(loader)"):
+			record.Loader, err = time.ParseDuration(words[idx-1])
+		case strings.Contains(word, "(kernel)"):
+			record.Kernel, err = time.ParseDuration(words[idx-1])
+		case strings.Contains(word, "(initrd)"):
+			record.Initrd, err = time.ParseDuration(words[idx-1])
+		case strings.Contains(word, "(userspace)"):
+			record.Userspace, err = time.ParseDuration(words[idx-1])
+		case strings.Contains(word, "="):
+			record.Total, err = time.ParseDuration(words[idx+1])
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &record, nil
+}
+
+func RunAnalysis(fileName string) (*model.BootTimeRecord, error) {
+	g := new(errgroup.Group)
+
+	var recordSystemdAnalyze *BootTimeRecordWithSystemd
+	g.Go(func() error {
+		var err error
+		recordSystemdAnalyze, err = RetrieveBootTimeWithSystemdAnalyze()
+		if err != nil {
+			return fmt.Errorf("retrieving boot time with systemd-analyze: %w", err)
+		}
+		return nil
+	})
+
+	var recordSystemdDbus *BootTimeRecordWithSystemd
+	g.Go(func() error {
+		var err error
+		recordSystemdDbus, err = RetrieveBootTimeWithDbus()
+		if err != nil {
+			return fmt.Errorf("retrieving boot time with dbus property: %w", err)
+		}
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	values := map[model.BootTimeStage]map[model.RetrievalMethod]time.Duration{
+		model.BootTimeStageFirmware: {
+			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Firmware,
+			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Firmware,
+		},
+		model.BootTimeStageLoader: {
+			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Loader,
+			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Loader,
+		},
+		model.BootTimeStageKernel: {
+			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Kernel,
+			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Kernel,
+		},
+		model.BootTimeStageInitrd: {
+			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Initrd,
+			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Initrd,
+		},
+		model.BootTimeStageUserspace: {
+			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Userspace,
+			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Userspace,
+		},
+		model.BootTimeStageTotal: {
+			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Total,
+			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Total,
+		},
+	}
+
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("opening file %s: %w", fileName, err)
+	}
+	defer file.Close()
+
+	enc := json.NewEncoder(file)
+	if err := enc.Encode(values); err != nil {
+		return nil, fmt.Errorf("encoding analysis results to jsonl file: %w", err)
+	}
+
+	return &model.BootTimeRecord{
+		Values: values,
+	}, nil
+}
+
+func PrintRecordsAverage(fileName string) error {
+	file, err := os.Open(fileName)
+	if err != nil {
+		return fmt.Errorf("opening file %s: %w", fileName, err)
+	}
+	defer file.Close()
+
+	records, err := model.BootTimeRecordsFromFile(file)
+	if err != nil {
+		return fmt.Errorf("reading boot time records from file: %w", err)
+	}
+	fmt.Printf("records found: %d\n", len(records))
+
+	btra := model.NewBootTimeAccumulator()
+	for _, r := range records {
+		btra.Add(r)
+	}
+
+	btr := btra.Average()
+	btrBytes, err := json.Marshal(&btr)
+	if err != nil {
+		return fmt.Errorf("marshalling averaged results to json: %w", err)
+	}
+
+	fmt.Printf("%s\n", string(btrBytes))
+	return nil
 }

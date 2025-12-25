@@ -1,50 +1,113 @@
 package model
 
 import (
-	"errors"
-	"strings"
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"os"
 	"time"
 )
 
+type RetrievalMethod string
+
+const (
+	RetrievalMethodEFIVar         RetrievalMethod = "efi_var"
+	RetrievalMethodSystemdDBUS    RetrievalMethod = "systemd_dbus"
+	RetrievalMethodSystemdAnalyze RetrievalMethod = "systemd_analyze"
+)
+
+type BootTimeStage string
+
+const (
+	BootTimeStageFirmware  BootTimeStage = "firmware"
+	BootTimeStageLoader    BootTimeStage = "loader"
+	BootTimeStageKernel    BootTimeStage = "kernel"
+	BootTimeStageInitrd    BootTimeStage = "initrd"
+	BootTimeStageUserspace BootTimeStage = "userspace"
+	BootTimeStageTotal     BootTimeStage = "total"
+)
+
 type BootTimeRecord struct {
-	Firmware  time.Duration
-	Loader    time.Duration
-	Kernel    time.Duration
-	Initrd    time.Duration
-	Userspace time.Duration
-	Total     time.Duration
+	Values map[BootTimeStage]map[RetrievalMethod]time.Duration
 }
 
-func ParseSystemdAnalyzeTimeOutput(output string) (*BootTimeRecord, error) {
-	lines := strings.Split(output, "\n")
-	if len(lines) == 0 {
-		return nil, errors.New("empty output")
+type BootTimeAccumulator struct {
+	sum   map[BootTimeStage]map[RetrievalMethod]time.Duration
+	count map[BootTimeStage]map[RetrievalMethod]int
+}
+
+func NewBootTimeAccumulator() *BootTimeAccumulator {
+	return &BootTimeAccumulator{
+		sum:   make(map[BootTimeStage]map[RetrievalMethod]time.Duration),
+		count: make(map[BootTimeStage]map[RetrievalMethod]int),
 	}
+}
 
-	line := lines[0]
-	words := strings.Fields(line)
-
-	// Startup finished in 1.762s (firmware) + 265ms (loader) + 640ms (kernel) + 196ms (initrd) + 1.667s (userspace) = 4.532s
-	var record BootTimeRecord
-	var err error
-	for idx, word := range words {
-		switch {
-		case strings.Contains(word, "(firmware)"):
-			record.Firmware, err = time.ParseDuration(words[idx-1])
-		case strings.Contains(word, "(loader)"):
-			record.Loader, err = time.ParseDuration(words[idx-1])
-		case strings.Contains(word, "(kernel)"):
-			record.Kernel, err = time.ParseDuration(words[idx-1])
-		case strings.Contains(word, "(initrd)"):
-			record.Initrd, err = time.ParseDuration(words[idx-1])
-		case strings.Contains(word, "(userspace)"):
-			record.Userspace, err = time.ParseDuration(words[idx-1])
-		case strings.Contains(word, "="):
-			record.Total, err = time.ParseDuration(words[idx+1])
+func (a *BootTimeAccumulator) Add(r *BootTimeRecord) {
+	for stage, methods := range r.Values {
+		if a.sum[stage] == nil {
+			a.sum[stage] = make(map[RetrievalMethod]time.Duration)
+			a.count[stage] = make(map[RetrievalMethod]int)
 		}
-		if err != nil {
-			return nil, err
+
+		for method, d := range methods {
+			a.sum[stage][method] += d
+			a.count[stage][method]++
 		}
 	}
-	return &record, nil
+}
+
+func (a *BootTimeAccumulator) Average() *BootTimeRecord {
+	out := &BootTimeRecord{
+		Values: make(map[BootTimeStage]map[RetrievalMethod]time.Duration),
+	}
+
+	for stage, methods := range a.sum {
+		out.Values[stage] = make(map[RetrievalMethod]time.Duration)
+
+		for method, total := range methods {
+			out.Values[stage][method] = total / time.Duration(a.count[stage][method])
+		}
+	}
+
+	return out
+}
+
+func BootTimeRecordsFromFile(file *os.File) ([]*BootTimeRecord, error) {
+	records := []*BootTimeRecord{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+
+		var rec BootTimeRecord
+		if err := UnmarshalBootTimeRecord(line, &rec); err != nil {
+			return nil, fmt.Errorf("unmarshalling boot time record from line: %w", err)
+		}
+		records = append(records, &rec)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return records, nil
+}
+
+func UnmarshalBootTimeRecord(line []byte, out *BootTimeRecord) error {
+	var raw map[BootTimeStage]map[RetrievalMethod]time.Duration
+	if err := json.Unmarshal(line, &raw); err != nil {
+		return fmt.Errorf("unmarshalling from json: %w", err)
+	}
+
+	out.Values = make(map[BootTimeStage]map[RetrievalMethod]time.Duration)
+
+	for bootTimeStage, methods := range raw {
+		out.Values[bootTimeStage] = make(map[RetrievalMethod]time.Duration)
+
+		for retrievalMethod, duration := range methods {
+			out.Values[bootTimeStage][retrievalMethod] = duration
+		}
+	}
+
+	return nil
 }
