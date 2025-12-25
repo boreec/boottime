@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/boreec/boottime/acpi"
 	"github.com/boreec/boottime/model"
 	"github.com/godbus/dbus/v5"
 	"golang.org/x/sync/errgroup"
@@ -272,17 +273,29 @@ func RunAnalysis(fileName string) (*model.BootTimeRecord, error) {
 		return nil
 	})
 
+	var recordACPIFPDT *acpi.BootTimeRecord
+	g.Go(func() error {
+		var err error
+		recordACPIFPDT, err = acpi.RetrieveBootTimeRecord()
+		if err != nil {
+			return fmt.Errorf("reading acpi fpdt table: %w", err)
+		}
+		return nil
+	})
+
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 
 	values := map[model.BootTimeStage]map[model.RetrievalMethod]time.Duration{
 		model.BootTimeStageFirmware: {
+			model.RetrievalMethodACPIFPDT:       recordACPIFPDT.Firmware,
 			model.RetrievalMethodEFIVar:         recordEFIVars.Firmware,
 			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Firmware,
 			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Firmware,
 		},
 		model.BootTimeStageLoader: {
+			model.RetrievalMethodACPIFPDT:       recordACPIFPDT.Loader,
 			model.RetrievalMethodEFIVar:         recordEFIVars.Loader,
 			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Loader,
 			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Loader,

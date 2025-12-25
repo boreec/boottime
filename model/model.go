@@ -11,12 +11,14 @@ import (
 type RetrievalMethod string
 
 const (
+	RetrievalMethodACPIFPDT       RetrievalMethod = "acpi_fpdt"
 	RetrievalMethodEFIVar         RetrievalMethod = "efi_var"
 	RetrievalMethodSystemdDBUS    RetrievalMethod = "systemd_dbus"
 	RetrievalMethodSystemdAnalyze RetrievalMethod = "systemd_analyze"
 )
 
 var allRetrievalMethods = []RetrievalMethod{
+	RetrievalMethodACPIFPDT,
 	RetrievalMethodEFIVar,
 	RetrievalMethodSystemdDBUS,
 	RetrievalMethodSystemdAnalyze,
