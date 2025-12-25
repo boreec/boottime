@@ -1,11 +1,14 @@
 package exec
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +16,101 @@ import (
 	"github.com/godbus/dbus/v5"
 	"golang.org/x/sync/errgroup"
 )
+
+const efivarsPath string = "/sys/firmware/efi/efivars"
+
+type BootTimeRecordWithEFIVariables struct {
+	Firmware time.Duration
+	Loader   time.Duration
+}
+
+func RetrieveBootTimeWithEFIVars() (*BootTimeRecordWithEFIVariables, error) {
+	entries, err := os.ReadDir(efivarsPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading directory %s: %w", efivarsPath, err)
+	}
+
+	var initPath, execPath string
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case strings.HasPrefix(name, "LoaderTimeInitUSec-"):
+			initPath = filepath.Join(efivarsPath, name)
+		case strings.HasPrefix(name, "LoaderTimeExecUSec-"):
+			execPath = filepath.Join(efivarsPath, name)
+		}
+
+		if initPath != "" && execPath != "" {
+			break
+		}
+	}
+
+	if initPath == "" || execPath == "" {
+		return nil, fmt.Errorf("EFI loader timing variables not found")
+	}
+
+	initRaw, err := readEFIVarValue(initPath)
+	if err != nil {
+		return nil, err
+	}
+	execRaw, err := readEFIVarValue(execPath)
+	if err != nil {
+		return nil, err
+	}
+
+	initTime, err := parseEFIMicroseconds(initRaw)
+	if err != nil {
+		return nil, err
+	}
+	execTime, err := parseEFIMicroseconds(execRaw)
+	if err != nil {
+		return nil, err
+	}
+
+	if execTime < initTime {
+		return nil, fmt.Errorf("EFI loader exec time < init time")
+	}
+
+	return &BootTimeRecordWithEFIVariables{
+		Firmware: initTime,
+		Loader:   execTime - initTime,
+	}, nil
+}
+
+func readEFIVarValue(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading file %s: %w", path, err)
+	}
+	if len(data) < 4 {
+		return nil, errors.New("EFI var too short")
+	}
+	// first 4 bytes are attributes; skip them
+	return data[4:], nil
+}
+
+func parseEFIMicroseconds(data []byte) (time.Duration, error) {
+	if len(data)%2 != 0 {
+		return 0, fmt.Errorf("invalid UTF-16 length")
+	}
+
+	// decode UTF-16 LE digits
+	runes := make([]rune, 0, len(data)/2)
+	for i := 0; i+1 < len(data); i += 2 {
+		v := binary.LittleEndian.Uint16(data[i:])
+		if v == 0 {
+			break // NUL-terminated
+		}
+		runes = append(runes, rune(v))
+	}
+
+	us, err := strconv.ParseInt(string(runes), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return time.Duration(us) * time.Microsecond, nil
+}
 
 type BootTimeRecordWithSystemd struct {
 	Firmware  time.Duration
@@ -41,14 +139,13 @@ func RetrieveBootTimeWithDbus() (*BootTimeRecordWithSystemd, error) {
 
 	obj := conn.Object("org.freedesktop.systemd1", "/org/freedesktop/systemd1")
 
-	var firmwareTs, loaderTs, kernelTs, initrdTs, userspaceTs, totalTs uint64
+	var firmwareTs, loaderTs, initrdTs, userspaceTs, finishTs uint64
 	properties := map[string]*uint64{
 		"FirmwareTimestampMonotonic":  &firmwareTs,
 		"LoaderTimestampMonotonic":    &loaderTs,
-		"KernelTimestamp":             &kernelTs,
 		"InitRDTimestampMonotonic":    &initrdTs,
 		"UserspaceTimestampMonotonic": &userspaceTs,
-		"FinishTimestampMonotonic":    &totalTs,
+		"FinishTimestampMonotonic":    &finishTs,
 	}
 
 	for propName, dest := range properties {
@@ -56,7 +153,6 @@ func RetrieveBootTimeWithDbus() (*BootTimeRecordWithSystemd, error) {
 		err := obj.Call("org.freedesktop.DBus.Properties.Get", 0,
 			"org.freedesktop.systemd1.Manager", propName).Store(&value)
 		if err != nil {
-			// Some properties might not be available on all systems
 			continue
 		}
 
@@ -65,14 +161,15 @@ func RetrieveBootTimeWithDbus() (*BootTimeRecordWithSystemd, error) {
 		}
 	}
 
-	if totalTs == 0 {
+	if finishTs == 0 {
 		return nil, errors.New("bootup is not yet finished")
 	}
 
 	usec := func(us uint64) time.Duration {
 		return time.Duration(us) * time.Microsecond
 	}
-	// Determine kernel done time
+
+	// Determine kernel_done_time
 	var kernelDoneTime uint64
 	if initrdTs > 0 {
 		kernelDoneTime = initrdTs
@@ -82,6 +179,7 @@ func RetrieveBootTimeWithDbus() (*BootTimeRecordWithSystemd, error) {
 
 	record := &BootTimeRecordWithSystemd{}
 
+	// Match systemd's calculation exactly
 	if firmwareTs > 0 && loaderTs > 0 {
 		record.Firmware = usec(firmwareTs - loaderTs)
 	}
@@ -92,12 +190,17 @@ func RetrieveBootTimeWithDbus() (*BootTimeRecordWithSystemd, error) {
 
 	record.Kernel = usec(kernelDoneTime)
 
-	if initrdTs > 0 {
+	if initrdTs > 0 && userspaceTs > 0 {
 		record.Initrd = usec(userspaceTs - initrdTs)
 	}
 
-	record.Userspace = usec(totalTs - userspaceTs)
-	record.Total = usec(firmwareTs + totalTs)
+	if finishTs > 0 && userspaceTs > 0 {
+		record.Userspace = usec(finishTs - userspaceTs)
+	}
+
+	if firmwareTs > 0 && finishTs > 0 {
+		record.Total = usec(firmwareTs + finishTs)
+	}
 
 	return record, nil
 }
@@ -158,16 +261,28 @@ func RunAnalysis(fileName string) (*model.BootTimeRecord, error) {
 		return nil
 	})
 
+	var recordEFIVars *BootTimeRecordWithEFIVariables
+	g.Go(func() error {
+		var err error
+		recordEFIVars, err = RetrieveBootTimeWithEFIVars()
+		if err != nil {
+			return fmt.Errorf("retrieving boot time with efi vars: %w", err)
+		}
+		return nil
+	})
+
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 
 	values := map[model.BootTimeStage]map[model.RetrievalMethod]time.Duration{
 		model.BootTimeStageFirmware: {
+			model.RetrievalMethodEFIVar:         recordEFIVars.Firmware,
 			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Firmware,
 			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Firmware,
 		},
 		model.BootTimeStageLoader: {
+			model.RetrievalMethodEFIVar:         recordEFIVars.Loader,
 			model.RetrievalMethodSystemdAnalyze: recordSystemdAnalyze.Loader,
 			model.RetrievalMethodSystemdDBUS:    recordSystemdDbus.Loader,
 		},
