@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func RetrieveBootTimes(fileName string) (*model.BootTimeRecord, error) {
+func RetrieveBootTimes(fileName string) error {
 	g := new(errgroup.Group)
 
 	var recordSystemdAnalyze *systemd.BootTimeRecord
@@ -58,7 +58,7 @@ func RetrieveBootTimes(fileName string) (*model.BootTimeRecord, error) {
 	})
 
 	if err := g.Wait(); err != nil {
-		return nil, err
+		return err
 	}
 
 	values := map[model.BootTimeStage]map[model.RetrievalMethod]time.Duration{
@@ -94,18 +94,16 @@ func RetrieveBootTimes(fileName string) (*model.BootTimeRecord, error) {
 
 	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("opening file %s: %w", fileName, err)
+		return fmt.Errorf("opening file %s: %w", fileName, err)
 	}
 	defer file.Close()
 
 	enc := json.NewEncoder(file)
 	if err := enc.Encode(values); err != nil {
-		return nil, fmt.Errorf("encoding analysis results to jsonl file: %w", err)
+		return fmt.Errorf("encoding analysis results to jsonl file: %w", err)
 	}
 
-	return &model.BootTimeRecord{
-		Values: values,
-	}, nil
+	return nil
 }
 
 func PrintRecordsAverage(fileName string, pretiffy bool) error {

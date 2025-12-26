@@ -9,21 +9,15 @@ import (
 )
 
 func main() {
-	args, flags, err := parseArgs()
-	if err != nil {
+	var args Args
+	var flags Flags
+
+	if err := parseArgs(&args, &flags); err != nil {
 		panic(err.Error())
 	}
 
-	if flags.RunRetrieveBootTime {
-		if _, err := exec.RetrieveBootTimes(args.FileName); err != nil {
-			panic(err.Error())
-		}
-	}
-
-	if flags.RunAggregate {
-		if err := exec.PrintRecordsAverage(args.FileName, flags.Prettify); err != nil {
-			panic(err.Error())
-		}
+	if err := runWithArgs(&args, &flags); err != nil {
+		panic(err.Error())
 	}
 }
 
@@ -37,8 +31,7 @@ type Args struct {
 	FileName string
 }
 
-func parseArgs() (*Args, *Flags, error) {
-	var flags Flags
+func parseArgs(args *Args, flags *Flags) error {
 	flag.BoolVar(&flags.RunRetrieveBootTime, "R", false, "retrieve boot time")
 	flag.BoolVar(&flags.RunRetrieveBootTime, "retrieve-boot-time", false, "retrieve boot time")
 
@@ -51,22 +44,33 @@ func parseArgs() (*Args, *Flags, error) {
 
 	argsUnparsed := flag.Args()
 	if len(argsUnparsed) == 0 {
-		return nil, nil, errors.New("expected 1 arg for jsonl file, found 0")
+		return errors.New("expected 1 arg for jsonl file, found 0")
 	}
-	var args Args
 	args.FileName = argsUnparsed[0]
 
 	if !strings.HasSuffix(args.FileName, ".jsonl") {
-		return nil, nil, errors.New("argument should be a file name with .jsonl suffix")
+		return errors.New("argument should be a file name with .jsonl suffix")
 	}
 
 	if flags.RunAggregate && flags.RunRetrieveBootTime {
-		return nil, nil, errors.New("flags -A and -R are incompatible")
+		return errors.New("flags -A and -R are incompatible")
 	}
 
 	if !flags.RunAggregate && !flags.RunRetrieveBootTime {
-		return nil, nil, errors.New("flags -A or -R required")
+		return errors.New("flags -A or -R required")
 	}
 
-	return &args, &flags, nil
+	return nil
+}
+
+func runWithArgs(args *Args, flags *Flags) error {
+	if flags.RunRetrieveBootTime {
+		return exec.RetrieveBootTimes(args.FileName)
+	}
+
+	if flags.RunAggregate {
+		return exec.PrintRecordsAverage(args.FileName, flags.Prettify)
+	}
+
+	return nil
 }
