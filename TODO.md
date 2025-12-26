@@ -4,7 +4,6 @@ By order of priority.
 
 - [ ] Make boot time retrieving failure from a source as non-blocking for other 
   sources.
-- [ ] Refactor exec into better named packages.
 - [ ] Replace flags with subcommands
 - [ ] Cover aggregation and average logic with tests.
 - [ ] Check other ACPI tables that could be used.
@@ -19,4 +18,5 @@ By order of priority.
 ## Done
 
 - [X] Retrieve boot time from `/sys/firmware/acpi/tables/FPDT`.
+- [X] Refactor exec into better named packages.
 

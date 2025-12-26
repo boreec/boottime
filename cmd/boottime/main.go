@@ -15,7 +15,7 @@ func main() {
 	}
 
 	if flags.RunRetrieveBootTime {
-		if _, err := exec.RunAnalysis(args.FileName); err != nil {
+		if _, err := exec.RetrieveBootTimes(args.FileName); err != nil {
 			panic(err.Error())
 		}
 	}
