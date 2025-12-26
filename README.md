@@ -9,6 +9,14 @@ multiple sources.
 - systemd
 - systemd-analyze
 
+## Sources
+
+### ACPI
+
+> Modern PCs are horrible. ACPI is a complete design disaster in every way. But we're kind of stuck with it. If any Intel people are listening to this and you had anything to do with ACPI, shoot yourself now, before you reproduce.
+>
+> - **Linus Torvald**, [Linux Journal](http://www.linuxjournal.com/article/7279)
+
 ## Usage
 
 ### Collect boot time records
