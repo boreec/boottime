@@ -17,6 +17,10 @@ multiple sources.
 >
 > - **Linus Torvald**, [Linux Journal](http://www.linuxjournal.com/article/7279)
 
+The **firmware** and **boot loader** durations are retrieved from the
+[FPDT table](https://uefi.org/htmlspecs/ACPI_Spec_6_4_html/05_ACPI_Software_Programming_Model/ACPI_Software_Programming_Model.html#firmware-basic-boot-performance-data-record)
+when available.
+
 ## Usage
 
 ### Collect boot time records

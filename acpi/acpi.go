@@ -24,21 +24,48 @@ const (
 // TableHeader is the standard header common to all ACPI tables (36 bytes).
 type TableHeader struct {
 	// Signature is a a 4-byte slice identifying the table ("ECDT", "FPDT", etc).
-	Signature       [4]byte
-	Length          uint32
-	Revision        uint8
-	Checksum        uint8
-	OEMID           [6]byte
-	OEMTableID      [8]byte
-	OEMRevision     uint32
-	CreatorID       uint32
+	Signature [4]byte
+	// Length is the length of the entire table in bytes.
+	Length uint32
+	// Revision is the revision of the structure corresponding to the signature
+	// field for this table. For the Firmware Performance Data Table conforming
+	// to this revision of the specification, the revision is 1.
+	Revision uint8
+	// Checksum is used to check the table validity. The entire table, including
+	// the checksum field, must add to zero to be considered valid.
+	Checksum uint8
+	// OEMID is an OEM-supplied string that identifies the OEM.
+	OEMID [6]byte
+	// OEMTableID is an OEM-supplied string that the OEM uses to identify this
+	///particular data table.
+	OEMTableID [8]byte
+	// OEMRevision is an OEM-supplied revision number.
+	OEMRevision uint32
+	// CreatorID is the Vendor ID of the utility that created this table.
+	CreatorID uint32
+	// CreatorRevision is the revision of the utility that created this table.
 	CreatorRevision uint32
 }
 
 // TableHeaderFPDT is the common header for FPDT records inside.
 type TableHeaderFPDT struct {
-	Type     uint16
-	Length   uint8
+	// Type depicts the format and contents of the performance record:
+	//  - 0x0000: Firmware Basic Boot Performance Pointer Record.
+	//  - 0x0001: S3 Performance Table Pointer Record.
+	// 	- 0x0002 - 0x0FFF: Reserved for ACPI specification usage.
+	//  - 0x1000 - 0x1FFF: Reserved for Platform Vendor usage.
+	//  - 0x2000 - 0x2FFF: Reserved for Hardware Vendor usage.
+	//  - 0x3000 - 0x3FFF: Reserved for platform firmware Vendor usage.
+	//  - 0x4000 - 0xFFFF: Reserved for future use.
+	Type uint16
+	// Length of the performance record in bytes.
+	Length uint8
+	// Revision value is updated if the format of the record type is extended.
+	// Any changes to a performance record layout must be backwards-compatible in
+	// that all previously defined fields must be maintained if still applicable,
+	// but newly defined fields allow the length of the performance record to be
+	// increased. Previously defined record fields must not be redefined, but are
+	// permitted to be deprecated.
 	Revision uint8
 }
 
@@ -53,15 +80,28 @@ type TablePointerRecordFPDT struct {
 // TableRecordFPDT is the content of the FPDT table.
 type TableRecordFPDT struct {
 	// Header is the header of the table.
-	Header   TableHeaderFPDT
+	Header TableHeaderFPDT
+	// Reserved
 	Reserved uint32
-	// ResetEnd is the approximate start time of the firmware.
+	// ResetEnd is the timer value logged at the beginning of firmware image
+	// execution. This may not always be zero or near zero.
 	ResetEnd uint64
-	// OSLoaderLoadImageStart is the start time of the boot loader.
-	OSLoaderLoadImageStart  uint64
+	// OSLoaderLoadImageStart is the timer value logged just prior to loading the
+	// OS boot loader into memory. For non-UEFI compatible boots, this field must
+	// be zero
+	OSLoaderLoadImageStart uint64
+	// OSLoaderStartImageStart is timer value logged just prior to launching the
+	// currently loaded OS boot loader image. For non-UEFI compatible boots, the
+	// timer value logged will be just prior to the INT 19h handler invocation.
 	OSLoaderStartImageStart uint64
-	ExitBootServicesEntry   uint64
-	// ExitBootServicesExit is the end time of the boot loader.
+	// ExitBootServicesEntry is the timer value logged at the point when the OS
+	// loader calls the ExitBootServices function for UEFI compatible firmware.
+	// For non-UEFI compatible boots, this field must be zero.
+	ExitBootServicesEntry uint64
+	// ExitBootServicesExit is the timer value logged at the point just prior to
+	// the OS loader gaining control back from the ExitBootServices function for
+	// UEFI compatible firmware. For non-UEFI compatible boots, this field must be
+	// zero.
 	ExitBootServicesExit uint64
 }
 
