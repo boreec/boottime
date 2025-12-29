@@ -10,6 +10,10 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
+// ErrParseAnalyzeCommandEmptyOutput is returned when the systemd-analyze time
+// command returns an empty output.
+var ErrParseAnalyzeCommandEmptyOutput = errors.New("command output is empty")
+
 type BootTimeRecord struct {
 	Firmware  time.Duration
 	Loader    time.Duration
@@ -25,7 +29,13 @@ func RetrieveBootTimeWithAnalyzeCommand() (*BootTimeRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("command failed: %w", err)
 	}
-	return ParseSystemdAnalyzeTimeOutput(string(out))
+
+	btr, err := ParseAnalyzeCommandOutput(string(out))
+	if err != nil {
+		return nil, fmt.Errorf("parsing command output: %w", err)
+	}
+
+	return btr, nil
 }
 
 func RetrieveBootTimeWithDbus() (*BootTimeRecord, error) {
@@ -103,10 +113,12 @@ func RetrieveBootTimeWithDbus() (*BootTimeRecord, error) {
 	return record, nil
 }
 
-func ParseSystemdAnalyzeTimeOutput(output string) (*BootTimeRecord, error) {
+// ParseAnalyzeCommandOutput parses the string output of the systemd-analyze time
+// command and returns the duration.
+func ParseAnalyzeCommandOutput(output string) (*BootTimeRecord, error) {
 	lines := strings.Split(output, "\n")
-	if len(lines) == 0 {
-		return nil, errors.New("empty output")
+	if output == "" || len(lines) == 0 {
+		return nil, ErrParseAnalyzeCommandEmptyOutput
 	}
 
 	line := lines[0]
@@ -118,16 +130,34 @@ func ParseSystemdAnalyzeTimeOutput(output string) (*BootTimeRecord, error) {
 		switch {
 		case strings.Contains(word, "(firmware)"):
 			record.Firmware, err = time.ParseDuration(words[idx-1])
+			if err != nil {
+				err = fmt.Errorf("parsing firmware duration: %w", err)
+			}
 		case strings.Contains(word, "(loader)"):
 			record.Loader, err = time.ParseDuration(words[idx-1])
+			if err != nil {
+				err = fmt.Errorf("parsing loader duration: %w", err)
+			}
 		case strings.Contains(word, "(kernel)"):
 			record.Kernel, err = time.ParseDuration(words[idx-1])
+			if err != nil {
+				err = fmt.Errorf("parsing kernel duration: %w", err)
+			}
 		case strings.Contains(word, "(initrd)"):
 			record.Initrd, err = time.ParseDuration(words[idx-1])
+			if err != nil {
+				err = fmt.Errorf("parsing initrd duration: %w", err)
+			}
 		case strings.Contains(word, "(userspace)"):
 			record.Userspace, err = time.ParseDuration(words[idx-1])
+			if err != nil {
+				err = fmt.Errorf("parsing userspace duration: %w", err)
+			}
 		case strings.Contains(word, "="):
 			record.Total, err = time.ParseDuration(words[idx+1])
+			if err != nil {
+				err = fmt.Errorf("parsing total serspace duration: %w", err)
+			}
 		}
 		if err != nil {
 			return nil, err
