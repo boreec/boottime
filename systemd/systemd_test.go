@@ -27,6 +27,20 @@ graphical.target reached after 13.270s in userspace.`,
 				assert.Equal(t, time.Duration(19656)*time.Millisecond, btr.Total, name)
 			},
 		},
+		"parse valid input successfully for long boot": {
+			input: `Startup finished in 1.734s (firmware) + 3.698s (loader) + 716ms (kernel) + 1.722s (initrd) + 58.126s (userspace) = 1min 5.998s
+graphical.target reached after 58.126s in userspace.`,
+			validate: func(t *testing.T, btr *BootTimeRecord, err error, name string) {
+				require.NoError(t, err, name)
+				require.NotNil(t, btr, name)
+				assert.Equal(t, time.Duration(1734)*time.Millisecond, btr.Firmware, name)
+				assert.Equal(t, time.Duration(3698)*time.Millisecond, btr.Loader, name)
+				assert.Equal(t, time.Duration(716)*time.Millisecond, btr.Kernel, name)
+				assert.Equal(t, time.Duration(1722)*time.Millisecond, btr.Initrd, name)
+				assert.Equal(t, time.Duration(58126)*time.Millisecond, btr.Userspace, name)
+				assert.Equal(t, time.Duration(65998)*time.Millisecond, btr.Total, name)
+			},
+		},
 		"parse empty input returns error": {
 			input: "",
 			validate: func(t *testing.T, btr *BootTimeRecord, err error, name string) {

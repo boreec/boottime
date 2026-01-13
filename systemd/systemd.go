@@ -129,34 +129,34 @@ func ParseAnalyzeCommandOutput(output string) (*BootTimeRecord, error) {
 	for idx, word := range words {
 		switch {
 		case strings.Contains(word, "(firmware)"):
-			record.Firmware, err = time.ParseDuration(words[idx-1])
+			record.Firmware, err = parseDuration(words[idx-1 : idx])
 			if err != nil {
 				err = fmt.Errorf("parsing firmware duration: %w", err)
 			}
 		case strings.Contains(word, "(loader)"):
-			record.Loader, err = time.ParseDuration(words[idx-1])
+			record.Loader, err = parseDuration(words[idx-1 : idx])
 			if err != nil {
 				err = fmt.Errorf("parsing loader duration: %w", err)
 			}
 		case strings.Contains(word, "(kernel)"):
-			record.Kernel, err = time.ParseDuration(words[idx-1])
+			record.Kernel, err = parseDuration(words[idx-1 : idx])
 			if err != nil {
 				err = fmt.Errorf("parsing kernel duration: %w", err)
 			}
 		case strings.Contains(word, "(initrd)"):
-			record.Initrd, err = time.ParseDuration(words[idx-1])
+			record.Initrd, err = parseDuration(words[idx-1 : idx])
 			if err != nil {
 				err = fmt.Errorf("parsing initrd duration: %w", err)
 			}
 		case strings.Contains(word, "(userspace)"):
-			record.Userspace, err = time.ParseDuration(words[idx-1])
+			record.Userspace, err = parseDuration(words[idx-1 : idx])
 			if err != nil {
 				err = fmt.Errorf("parsing userspace duration: %w", err)
 			}
 		case strings.Contains(word, "="):
-			record.Total, err = time.ParseDuration(words[idx+1])
+			record.Total, err = parseDuration(words[idx+1:])
 			if err != nil {
-				err = fmt.Errorf("parsing total serspace duration: %w", err)
+				err = fmt.Errorf("parsing total duration: %w", err)
 			}
 		}
 		if err != nil {
@@ -164,4 +164,17 @@ func ParseAnalyzeCommandOutput(output string) (*BootTimeRecord, error) {
 		}
 	}
 	return &record, nil
+}
+
+func parseDuration(words []string) (time.Duration, error) {
+	totalDuration := time.Duration(0)
+	for _, w := range words {
+		sanitizedWord := strings.ReplaceAll(w, "min", "m")
+		d, err := time.ParseDuration(sanitizedWord)
+		if err != nil {
+			return totalDuration, fmt.Errorf("parsing time duration for word %s: %w", w, err)
+		}
+		totalDuration += d
+	}
+	return totalDuration, nil
 }
